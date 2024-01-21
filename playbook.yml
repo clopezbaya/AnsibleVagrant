@@ -1,21 +1,60 @@
-- hosts: all
-  become: true
+- name: Instalar WordPress
+  hosts: all
+  become: yes
+  vars:
+    db_name: wordpress
+    db_user: wordpress
+    db_password: unir12345
+    wp_path: /var/www/html/wordpress
+    wp_title: 'Ansible con Wordpress - Christian Lopez Baya'
+    wp_admin_user: unir
+    wp_admin_password: unir12345
+    wp_admin_email: unir_christian@example.com
+
   tasks:
-    - name: Make sure we can connect
-      ping:
-    # PHP
-    - name: Install PHP
+    - name: Actualizar lista de paquetes
       apt:
-        name:
-          - php
-          - php-fpm
-          - php-mysql
-          - php-xml
-        state: present
         update_cache: yes
-    - name: Remove apache2
-      apt: name=apache2 state=absent
-    # MySQL
+
+    - name: Instalar paquetes necesarios
+      apt:
+        name: '{{ item }}'
+        state: present
+      loop:
+        - apache2
+        - php
+        - libapache2-mod-php
+        - php-mysql
+        - php-curl
+        - php-gd
+        - php-mbstring
+        - php-xml
+        - unzip
+
+    - name: Descargar e instalar WordPress
+      get_url:
+        url: 'https://wordpress.org/latest.zip'
+        dest: '/tmp/wordpress.zip'
+
+    - name: Descomprimir WordPress
+      unarchive:
+        src: '/tmp/wordpress.zip'
+        dest: '/var/www/html/'
+        remote_src: yes
+
+    - name: Configurar Apache para apuntar a la nueva carpeta
+      ansible.builtin.lineinfile:
+        path: /etc/apache2/sites-available/000-default.conf
+        regexp: "^\\s*DocumentRoot"
+        line: '    DocumentRoot /var/www/html/wordpress'
+      notify: restart apache2
+
+    - name: Descargar WP-CLI
+      ansible.builtin.get_url:
+        url: 'https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar'
+        dest: '/usr/local/bin/wp'
+        mode: '0755'
+
     - name: Install MySQL
       apt:
         name:
@@ -23,32 +62,33 @@
           - python-mysqldb
         state: present
         update_cache: yes
-    - name: Generate new root password
-      command: openssl rand -hex 7 creates=/root/.my.cnf
-      register: mysql_new_root_pass
-    # - name: Remove anonymous users
-    #   mysql_user: name="" state=absent
-    #   when: mysql_new_root_pass.changed
-    - name: Remove test database
-      mysql_db: name=test state=absent
-      when: mysql_new_root_pass.changed
-    - name: Output new root password
-      debug: msg="New root password is {{mysql_new_root_pass.stdout}}"
-      when: mysql_new_root_pass.changed
-    - name: Update root password
-      mysql_user: name=root host={{item}}
-        password={{mysql_new_root_pass.stdout}}
-      loop:
-        - '{{ansible_hostname}}'
-        - 127.0.0.1
-        - ::1
-        - localhost
-      when: mysql_new_root_pass.changed
-    - name: Create my.cnf
-      template: src=templates/mysql/my.cnf dest=/root/.my.cnf
-      when: mysql_new_root_pass.changed
-    #nginx
-    - name: Install nginx
-      apt: name=nginx state=present
-    - name: Start nginx
-      service: name=nginx state=started
+
+    - name: Crear base de datos y usuario en MySQL
+      mysql_db:
+        name: '{{ db_name }}'
+        state: present
+
+    - name: Crear usuario MySQL
+      mysql_user:
+        name: '{{ db_user }}'
+        password: '{{ db_password }}'
+        host: localhost
+        priv: '*.*:ALL'
+      notify: restart apache2
+
+    - name: Configurar wp-config.php
+      template:
+        src: wp-config.php
+        dest: '/var/www/html/wordpress/wp-config.php'
+      notify: restart apache2
+
+    - name: Instalar WordPress con WP-CLI
+      ansible.builtin.command:
+        cmd: 'wp core install --url=http://localhost:9000 --title="{{ wp_title }}" --admin_user="{{ wp_admin_user }}" --admin_password="{{ wp_admin_password }}" --admin_email="{{ wp_admin_email }}" --path="{{ wp_path }}" --allow-root'
+      become: yes
+
+  handlers:
+    - name: restart apache2
+      service:
+        name: apache2
+        state: restarted
