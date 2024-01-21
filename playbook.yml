@@ -42,18 +42,18 @@
         dest: '/var/www/html/'
         remote_src: yes
 
+    - name: Descargar WP-CLI
+      ansible.builtin.get_url:
+        url: 'https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar'
+        dest: '/usr/local/bin/wp'
+        mode: '0755'
+
     - name: Configurar Apache para apuntar a la nueva carpeta
       ansible.builtin.lineinfile:
         path: /etc/apache2/sites-available/000-default.conf
         regexp: "^\\s*DocumentRoot"
         line: '    DocumentRoot /var/www/html/wordpress'
       notify: restart apache2
-
-    - name: Descargar WP-CLI
-      ansible.builtin.get_url:
-        url: 'https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar'
-        dest: '/usr/local/bin/wp'
-        mode: '0755'
 
     - name: Install MySQL
       apt:
